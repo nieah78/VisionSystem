@@ -27,7 +27,8 @@ class RobotVisionSystem(Node):
 
         self.timer = self.create_timer(0.01, self.rvs)
 
-        self.line_roi = [[0, 640], [240, 300]]
+        self.line_roi = [[0, 640], [240, 400]]
+        self.traffic_light_roi = [[270,360],[160,200]]
 
     def rvs(self):
         self.sub_front_image
@@ -50,6 +51,17 @@ class RobotVisionSystem(Node):
         ## _line 함수에서의 결과에 따라 모터를 움직여야 할 것 같다!
         ## 아마 steer, moterspeed, breakbool 이 세 가지만 이용해 동작시키는듯
 
+        # 신호등 감지
+        light_status = self._trafficlight(self.image)
+
+        # 자동차 동작 제어
+        if light_status == "RED":
+            msg.motorspeed = 0.0  # 멈춤
+        elif light_status == "GREEN":
+            msg.motorspeed = 5.0  # 이동
+        else:
+            msg.motorspeed = 0.0  # 예외 처리 (급발진)
+
         self.pub_motor.publish(msg)
         # self.get_logger().info("Steer : %s MotorSpeed : %s Break : %s" % (msg.steer, msg.motorspeed, msg.breakbool))
 
@@ -60,6 +72,52 @@ class RobotVisionSystem(Node):
 
         # self._image()
     
+    def _trafficlight(self, image):
+        try:
+            # 신호등의 ROI 설정
+            traffic_light_roi = image[160:200, 270:360]
+
+            # ROI를 HSV 색공간으로 변환
+            hsv = cv2.cvtColor(traffic_light_roi, cv2.COLOR_BGR2HSV)
+
+            # 빨간불 범위 (HSV 색상 기준)
+            lower_red1 = np.array([0, 100, 100])  # 빨간색 하한값
+            upper_red1 = np.array([10, 255, 255])  # 빨간색 상한값
+            lower_red2 = np.array([160, 100, 100])  # 빨간색 하한값 (2번째 범위)
+            upper_red2 = np.array([180, 255, 255])  # 빨간색 상한값 (2번째 범위)
+
+            # 초록불 범위 (HSV 색상 기준)
+            lower_green = np.array([50, 100, 100])  # 초록색 하한값
+            upper_green = np.array([70, 255, 255])  # 초록색 상한값
+
+            # 빨간불 마스크
+            mask_red1 = cv2.inRange(hsv, lower_red1, upper_red1)
+            mask_red2 = cv2.inRange(hsv, lower_red2, upper_red2)
+            mask_red = cv2.bitwise_or(mask_red1, mask_red2)
+
+            # 초록불 마스크
+            mask_green = cv2.inRange(hsv, lower_green, upper_green)
+
+            # 빨간불과 초록불 픽셀 개수 계산
+            red_pixels = cv2.countNonZero(mask_red)
+            green_pixels = cv2.countNonZero(mask_green)
+
+            # 특정 영역 이상의 픽셀 개수로 빨간불/초록불 판별
+            threshold = 100  # 픽셀 개수 기준값
+            if red_pixels > threshold:
+                print(f"Red Light Detected: {red_pixels} pixels")
+                return "RED"
+            elif green_pixels > threshold:
+                print(f"Green Light Detected: {green_pixels} pixels")
+                return "GREEN"
+            else:
+                print("Unable to Detect Light")
+                return "UNKNOWN"
+        except Exception as ex:
+            print(f"[Error] [_trafficlight] Line : {ex.__traceback__.tb_lineno} | {ex}")
+            return "ERROR"
+
+    
     def _state(self, data):
         None
         # print(data)
@@ -68,7 +126,7 @@ class RobotVisionSystem(Node):
         None
         # print(data)
     
-    def _line(self, image, width=[0,640], height=[240,300]):
+    def _line(self, image, width=[0,640], height=[240,400]):
         try:
             if len(image.shape) > 1:
                 img_height, img_width, _ = image.shape
@@ -82,7 +140,7 @@ class RobotVisionSystem(Node):
                     blur_gray = cv2.GaussianBlur(gray,(5, 5), 0)
 
                     # ROI Area
-                    edge_img = cv2.Canny(np.uint8(blur_gray), 50, 150)
+                    edge_img = cv2.Canny(np.uint8(blur_gray), 60, 70)
 
                     # HoughLinesP
                     all_lines = cv2.HoughLinesP(edge_img, 1, math.pi/180,30,30,10)                  
@@ -117,9 +175,6 @@ class RobotVisionSystem(Node):
         except Exception as ex:
             print(f"\033[31m[Error] [_line]\033[0m Line : {ex.__traceback__.tb_lineno} | {ex}")
 
-    def _trafficlight(self):
-        print()
-    
     def _stopline(self):
         print()
         
@@ -132,6 +187,7 @@ class RobotVisionSystem(Node):
 
         line_image = self.image.copy()
         cv2.rectangle(line_image, (int(self.line_roi[0][0]), int(self.line_roi[1][0])), (int(self.line_roi[0][1]), int(self.line_roi[1][1])), (0,255,0), 3)
+        cv2.rectangle(line_image, (int(self.traffic_light_roi[0][0]), int(self.traffic_light_roi[1][0])), (int(self.traffic_light_roi[0][1]), int(self.traffic_light_roi[1][1])), (0,255,0), 3)
         cv2.line(line_image, (int(right_line_mean[0]), int(self.line_roi[1][0])),
                              (int(right_line_mean[2]), int(self.line_roi[1][1])),
                              (255,0,0),
