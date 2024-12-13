@@ -28,7 +28,7 @@ class RobotVisionSystem(Node):
         self.timer = self.create_timer(0.01, self.rvs)
 
         self.line_roi = [[0, 640], [240, 400]]
-        self.traffic_light_roi = [[270,360],[160,200]]
+        self.traffic_light_roi = [[270,360],[170,200]]
 
     def rvs(self):
         self.sub_front_image
@@ -75,35 +75,22 @@ class RobotVisionSystem(Node):
     def _trafficlight(self, image):
         try:
             # 신호등의 ROI 설정
-            traffic_light_roi = image[160:200, 270:360]
+            traffic_light_roi = image[170:200, 270:360]
 
-            # ROI를 HSV 색공간으로 변환
-            hsv = cv2.cvtColor(traffic_light_roi, cv2.COLOR_BGR2HSV)
+            # ROI 영역 내에서 조건에 따라 RED 또는 GREEN 상태 구분
+            red_dectect = (traffic_light_roi[:, :, 2] >= 200) & \
+                            (traffic_light_roi[:, :, 1] <= 100) & \
+                            (traffic_light_roi[:, :, 0] <= 100)
+            green_detect = (traffic_light_roi[:, :, 1] >= 200) & \
+                            (traffic_light_roi[:, :, 2] <= 100) & \
+                            (traffic_light_roi[:, :, 0] <= 100)
 
-            # 빨간불 범위 (HSV 색상 기준)
-            lower_red1 = np.array([0, 100, 100])  # 빨간색 하한값
-            upper_red1 = np.array([10, 255, 255])  # 빨간색 상한값
-            lower_red2 = np.array([160, 100, 100])  # 빨간색 하한값 (2번째 범위)
-            upper_red2 = np.array([180, 255, 255])  # 빨간색 상한값 (2번째 범위)
+            # 조건에 부합하는 픽셀 수 계산
+            red_pixels = np.sum(red_dectect)
+            green_pixels = np.sum(green_detect)
 
-            # 초록불 범위 (HSV 색상 기준)
-            lower_green = np.array([50, 100, 100])  # 초록색 하한값
-            upper_green = np.array([70, 255, 255])  # 초록색 상한값
-
-            # 빨간불 마스크
-            mask_red1 = cv2.inRange(hsv, lower_red1, upper_red1)
-            mask_red2 = cv2.inRange(hsv, lower_red2, upper_red2)
-            mask_red = cv2.bitwise_or(mask_red1, mask_red2)
-
-            # 초록불 마스크
-            mask_green = cv2.inRange(hsv, lower_green, upper_green)
-
-            # 빨간불과 초록불 픽셀 개수 계산
-            red_pixels = cv2.countNonZero(mask_red)
-            green_pixels = cv2.countNonZero(mask_green)
-
-            # 특정 영역 이상의 픽셀 개수로 빨간불/초록불 판별
-            threshold = 100  # 픽셀 개수 기준값
+            # 픽셀 개수에 따라 상태 결정
+            threshold = 40  # 픽셀 개수 기준값
             if red_pixels > threshold:
                 print(f"Red Light Detected: {red_pixels} pixels")
                 return "RED"
@@ -116,6 +103,7 @@ class RobotVisionSystem(Node):
         except Exception as ex:
             print(f"[Error] [_trafficlight] Line : {ex.__traceback__.tb_lineno} | {ex}")
             return "ERROR"
+
 
     
     def _state(self, data):
@@ -166,7 +154,7 @@ class RobotVisionSystem(Node):
                     rlm = np.array(right_lines).mean(axis=0)
                     llm = np.array(left_lines).mean(axis=0)
 
-                    print(f"{rlm}, {llm}")
+                    #print(f"{rlm}, {llm}")
 
                     return rlm, llm
             else:
