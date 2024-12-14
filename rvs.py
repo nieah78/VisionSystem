@@ -21,8 +21,8 @@ class RobotVisionSystem(Node):
         self.sub_state = self.create_subscription(State, '/car/state', self._state, 10)
         self.sub_ray = self.create_subscription(Ray, '/car/sensor/ray', self._ray, 10)
         self.sub_front_image = self.create_subscription(Image, '/car/sensor/camera/front', self._image, 10)
-        
-        self.i = 0
+
+        self.current_state = 0  # 현재 경로 상태 (0: Start -> Way0, ..., 4: Way3 -> Start)
         self.image = np.empty(shape=[1])
 
         self.timer = self.create_timer(0.01, self.rvs)
@@ -31,47 +31,78 @@ class RobotVisionSystem(Node):
         self.traffic_light_roi = [[270,360],[170,200]]
 
     def rvs(self):
+        # 센서 데이터 업데이트
         self.sub_front_image
         self.sub_ray
         self.sub_state
 
         msg = Motor()
-        # if 0 < self.i <= 1:    
-        #     msg.steer = 0.0
-        #     msg.motorspeed = 1.0
-        
-        # elif 1 < self.i <= 5:    
-        #     msg.steer = 30.0
-        #     msg.motorspeed = 1.0
-
-        # elif 5 < self.i <= 10:
-        #     msg.steer = -30.0
-        #     msg.motorspeed = 5.0
-
-        ## _line 함수에서의 결과에 따라 모터를 움직여야 할 것 같다!
-        ## 아마 steer, moterspeed, breakbool 이 세 가지만 이용해 동작시키는듯
 
         # 신호등 감지
         light_status = self._trafficlight(self.image)
 
-        # 자동차 동작 제어
-        if light_status == "RED":
-            msg.motorspeed = 0.0  # 멈춤
-        elif light_status == "GREEN":
-            msg.motorspeed = 5.0  # 이동
-        else:
-            msg.motorspeed = 0.0  # 예외 처리 (급발진)
+        # 경로 상태별 동작
+        if self.current_state == 0:  # Start -> Way0
+            if light_status == "RED":
+                self.stop(msg)
+            else:
+                self.turn_left(msg)
+
+        elif self.current_state == 1:  # Way0 -> Way1
+            if light_status == "RED":
+                self.stop(msg)
+            else:
+                self.turn_right(msg)
+
+        elif self.current_state == 2:  # Way1 -> Way2
+            if light_status == "RED":
+                self.stop(msg)
+            else:
+                self.go_straight(msg)
+
+        elif self.current_state == 3:  # Way2 -> Way3
+            if light_status == "RED":
+                self.stop(msg)
+            else:
+                self.turn_left(msg)
+
+        elif self.current_state == 4:  # Way3 -> End
+            if light_status == "RED":
+                self.stop(msg)
+            else:
+                self.go_straight(msg)
+
 
         self.pub_motor.publish(msg)
         # self.get_logger().info("Steer : %s MotorSpeed : %s Break : %s" % (msg.steer, msg.motorspeed, msg.breakbool))
 
         right_line_mean, left_line_mean = self._line(self.image, self.line_roi[0], self.line_roi[1])
-        self.i += 1
 
         self.viewer(right_line_mean, left_line_mean)
 
-        # self._image()
-    
+
+
+    def go_straight(self, msg):
+        msg.steer = 0.0
+        msg.motorspeed = 5.0
+        self.get_logger().info("직진!")
+
+    def turn_left(self, msg):
+        msg.steer = -15.0
+        msg.motorspeed = 3.0
+        self.get_logger().info("좌회전!")
+
+    def turn_right(self, msg):
+        msg.steer = 30.0
+        msg.motorspeed = 3.0
+        self.get_logger().info("우회전!")
+
+    def stop(self, msg):
+        msg.steer = 0.0
+        msg.motorspeed = 0.0
+        self.get_logger().info("정지!")
+
+
     def _trafficlight(self, image):
         try:
             # 신호등의 ROI 설정
@@ -90,16 +121,19 @@ class RobotVisionSystem(Node):
             green_pixels = np.sum(green_detect)
 
             # 픽셀 개수에 따라 상태 결정
-            threshold = 40  # 픽셀 개수 기준값
+            threshold = 30  # 픽셀 개수 기준값
             if red_pixels > threshold:
                 print(f"Red Light Detected: {red_pixels} pixels")
                 return "RED"
+            
             elif green_pixels > threshold:
                 print(f"Green Light Detected: {green_pixels} pixels")
                 return "GREEN"
+            
             else:
                 print("Unable to Detect Light")
                 return "UNKNOWN"
+                
         except Exception as ex:
             print(f"[Error] [_trafficlight] Line : {ex.__traceback__.tb_lineno} | {ex}")
             return "ERROR"
